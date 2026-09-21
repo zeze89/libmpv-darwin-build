@@ -1,8 +1,26 @@
 {
+  # Nightmare TV (2026-09-21): moved off the GitLab generated archive.
+  #
+  # `code.videolan.org/.../-/archive/...` tarballs are produced ON DEMAND and
+  # are not byte-stable: the same tag can come back with a different hash when
+  # the compression or the generator changes. A fresh build failed on exactly
+  # that:
+  #   error: hash mismatch in file downloaded from '.../dav1d-1.2.1.tar.bz2'
+  #     specified: sha256:1ymmvavcsn16gwiglm4lsv215yx31993b15c7bn9s460rlikc054
+  #     got:       sha256:1ds2pbwyqxcazm1xadxzyz72rjahb63vzx467n4bgclg7fcfygq5
+  #
+  # The pin itself was correct: downloading the same URL by hand returned
+  # a4003623cdc0109dec3aac8435520aa3fb12c4d69454fa227f2658cdb6dab5fa, which is
+  # what this file used to say. So the archive is simply unreliable, and
+  # bumping the hash would only move the next failure further out.
+  #
+  # downloads.videolan.org serves the real release artefact, which is stable
+  # and GPG signed (.asc alongside). Verified before switching: both archives
+  # extract to the SAME source tree, 294 files, `diff -rq` clean.
   dav1d = {
     version = "1.2.1";
-    url = "https://code.videolan.org/videolan/dav1d/-/archive/1.2.1/dav1d-1.2.1.tar.bz2";
-    sha256 = "a4003623cdc0109dec3aac8435520aa3fb12c4d69454fa227f2658cdb6dab5fa";
+    url = "https://downloads.videolan.org/pub/videolan/dav1d/1.2.1/dav1d-1.2.1.tar.xz";
+    sha256 = "4e33eb61ec54c768a16da0cf8fa0928b4c4593f5f804a3c887d4a21c318340b2";
   };
   ffmpeg = {
     version = "6.0";
