@@ -166,6 +166,30 @@ audio_default_options = [
     # filters
     '--enable-filter=overlay',
     '--enable-filter=equalizer',
+
+    # --- Nightmare TV: audio filter chain (2026-09-21) ---
+    #
+    # Two paid settings are dead without these, and they fail silently:
+    #   "Smart audio > Night mode" writes af=lavfi=[dynaudnorm=...] and mpv
+    #   answers "No such filter: 'dynaudnorm'".
+    #   "Channel Volume Levelling" writes af=loudnorm=... and mpv answers
+    #   "Option af: loudnorm doesn't exist".
+    #
+    # aformat/aresample/anull/asetpts are infrastructure: lavfi needs them to
+    # negotiate sample formats between filters. Without them the graph cannot
+    # be configured and the whole chain is dropped, exactly the way the video
+    # chain collapses without `scale`. The filter being named in the binary is
+    # not evidence that the graph builds.
+    #
+    # Licence: af_dynaudnorm.c and af_loudnorm.c are LGPL 2.1+, so the
+    # --disable-gpl / --enable-version3 stance is unchanged. loudnorm uses
+    # FFmpeg's own ebur128 implementation.
+    '--enable-filter=aformat',
+    '--enable-filter=aresample',
+    '--enable-filter=anull',
+    '--enable-filter=asetpts',
+    '--enable-filter=dynaudnorm',
+    '--enable-filter=loudnorm',
 ]
 
 # https://github.com/media-kit/libmpv-android-video-build/blob/7353af784df9bab3256acd8d90f208024d16ab96/buildscripts/flavors/default.sh
@@ -259,6 +283,67 @@ video_default_options = [
     '--enable-hwaccel=mpeg2_videotoolbox',
     '--enable-hwaccel=mpeg4_videotoolbox',
     '--enable-hwaccel=vp9_videotoolbox',
+
+    # --- Nightmare TV: video filters (2026-09-21) ---
+    #
+    # WHY: this build ships with no deinterlacer at all, so every interlaced
+    # channel (1080i, 576i, 480i — most of live TV outside 4K) shows comb
+    # lines. Measured on the shipped 2.1.77 .dmg: the embedded FFmpeg
+    # configuration lists exactly two filters, overlay and equalizer.
+    #
+    # DEINTERLACERS. mpv's own `deinterlace=yes` does not help: in
+    # filters/f_auto_filters.c the VideoToolbox pixel format falls through to
+    # the generic branch, which creates a lavfi `yadif`. No yadif in the
+    # binary means no deinterlacing by any route.
+    #
+    # INFRASTRUCTURE FILTERS. yadif/bwdif alone are NOT enough; this was
+    # measured the hard way on Windows and shipped broken for eleven days.
+    # lavfi needs scale/format to convert pixel formats while building the
+    # graph, and without them it abandons the whole graph:
+    #   ffmpeg: 'scale' filter not present, cannot convert formats.
+    #   lavfi: failed to configure the filter graph
+    #   vf: Disabling filter bwdif.00 because it has failed.
+    # The setting stays on, the filter name IS in the binary, and nothing
+    # runs. Never treat a filter name in a binary as evidence.
+    #
+    # PICTURE FILTERS. Low-bitrate IPTV carries noise and banding:
+    #   atadenoise  adaptive temporal denoise, cheap, keeps detail
+    #   unsharp     sharpening
+    #   gradfun     banding
+    # hqdn3d is deliberately absent: it is GPL in FFmpeg and this build is
+    # --disable-gpl, so whitelisting it would be silently ignored.
+    # nlmeans is deliberately absent: good quality, too slow for live 1080p50.
+    #
+    # LICENCE: vf_yadif.c and vf_bwdif.c are LGPL 2.1+ (verified for the
+    # Windows build against the same FFmpeg 6.0 source), so --disable-gpl and
+    # --enable-version3 are unchanged.
+    '--enable-filter=yadif',
+    '--enable-filter=bwdif',
+    '--enable-filter=scale',
+    '--enable-filter=format',
+    '--enable-filter=null',
+    '--enable-filter=copy',
+    '--enable-filter=setpts',
+    '--enable-filter=atadenoise',
+    '--enable-filter=unsharp',
+    '--enable-filter=gradfun',
+
+    # --- Nightmare TV: muxers (2026-09-21) ---
+    #
+    # The stock build enables no muxer at all. Without spdif, `audio-spdif`
+    # (Audio Passthrough) never opens the audio device. Without mpegts and
+    # matroska, mpv's `stream-record` reports "Output format not found" and
+    # writes nothing, which is the fallback recorder used when the user has
+    # no external ffmpeg installed.
+    #
+    # NOTE on passthrough: enabling spdif does NOT make Audio Passthrough
+    # work on macOS. That path is gated in the app for a different and
+    # correct reason — CoreAudio does not do bitstream passthrough and
+    # `audio-spdif` can silence playback entirely. The muxer is enabled for
+    # completeness and for the recorder, not as a passthrough fix.
+    '--enable-muxer=spdif',
+    '--enable-muxer=mpegts',
+    '--enable-muxer=matroska',
 ]
 
 audio_full_options = [

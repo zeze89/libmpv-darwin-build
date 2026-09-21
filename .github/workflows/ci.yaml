@@ -27,6 +27,38 @@ jobs:
 
       - uses: actions/checkout@v6
 
+      # Nightmare TV: the filter whitelist must survive a rebase on upstream.
+      #
+      # This exact list was lost once already, on the Windows fork: a branch
+      # was created from a fresh upstream base, every --enable-filter= line
+      # went with it, the build succeeded, the binary still contained the
+      # string "bwdif", and four features shipped dead for eleven days
+      # (deinterlacing, noise reduction, picture tuning, audio levelling).
+      #
+      # A comment inside meson.build cannot prevent that, because rebasing
+      # replaces that file. This step can: it runs before Nix is even
+      # installed, so a lost list costs one red minute instead of a release.
+      - name: Nightmare filter whitelist must be present
+        run: |
+          f=nix/packages/mk-pkg-ffmpeg/meson.build
+          missing=""
+          for x in yadif bwdif scale format null copy setpts \
+                   atadenoise unsharp gradfun \
+                   aformat aresample anull asetpts dynaudnorm loudnorm; do
+            grep -q -- "--enable-filter=$x'" "$f" || missing="$missing filter:$x"
+          done
+          for x in spdif mpegts matroska; do
+            grep -q -- "--enable-muxer=$x'" "$f" || missing="$missing muxer:$x"
+          done
+          if [ -n "$missing" ]; then
+            echo "$f is missing:$missing"
+            echo "These are not optional extras. Without scale/format the lavfi"
+            echo "graph cannot convert pixel formats and mpv disables the"
+            echo "deinterlacer outright, silently. Restore the block."
+            exit 1
+          fi
+          echo "filter whitelist: all 19 entries present"
+
       - uses: DeterminateSystems/nix-installer-action@v22
         with:
           extra-conf: |
