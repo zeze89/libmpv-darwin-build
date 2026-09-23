@@ -16,6 +16,7 @@ CASES = [
     # name, clip, clip_fps, frames, options
     ('h264_1080i_nofilter', 'h264_1080i25.ts', 25, 500, {'hwdec': 'no'}),
     ('h264_1080i_bwdif',    'h264_1080i25.ts', 25, 500, {'hwdec': 'no', 'vf': 'lavfi=[bwdif=mode=send_frame:parity=auto:deint=all]'}),
+    ('h264_1080i_bwdif_field', 'h264_1080i25.ts', 25, 500, {'hwdec': 'no', 'vf': 'lavfi=[bwdif=mode=send_field:parity=auto:deint=all]'}),
     ('h264_1080i_yadif',    'h264_1080i25.ts', 25, 500, {'hwdec': 'no', 'vf': 'lavfi=[yadif=mode=send_frame:parity=auto:deint=all]'}),
     ('h264_1080i_deint_yes','h264_1080i25.ts', 25, 500, {'hwdec': 'no', 'deinterlace': 'yes'}),
     ('h264_1080i_vt_copy_deint', 'h264_1080i25.ts', 25, 500, {'hwdec': 'videotoolbox-copy', 'deinterlace': 'yes'}),
