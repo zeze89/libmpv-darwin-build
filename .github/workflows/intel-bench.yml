@@ -1,0 +1,127 @@
+name: intel-bench
+
+# Nightmare TV: measure the shipped libmpv builds on an Intel Mac runner.
+#
+# A 2017 Intel MacBook Pro reported stutter with the app while a Chromium
+# based player was smooth. The Intel slice of mac-v2 was built without x86
+# SIMD; mac-v3 turns it on. This job plays the same clips through each
+# release's macOS frameworks (ctypes, vo=null, untimed) and reports how many
+# times real time each case runs. It also runs Homebrew FFmpeg with and
+# without SIMD (-cpuflags 0) on the same filters as an independent check.
+#
+# What it does NOT measure: GPU rendering, the Flutter texture path, display
+# timing. The VM has no GPU acceleration. A real Intel Mac is still needed
+# for a final verdict.
+#
+# Runs on push to the nightmare-bench branch, or by hand.
+
+on:
+  push:
+    branches:
+      - nightmare-bench
+  workflow_dispatch:
+    inputs:
+      versions:
+        description: 'Release tags to compare'
+        default: 'mac-v2 mac-v3'
+
+jobs:
+  bench:
+    runs-on: macos-15-intel
+    timeout-minutes: 60
+    env:
+      VERSIONS: ${{ github.event.inputs.versions || 'mac-v2 mac-v3' }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Machine
+        run: |
+          uname -m
+          sysctl -n machdep.cpu.brand_string
+          sysctl -n hw.ncpu hw.memsize
+          sysctl -n machdep.cpu.features machdep.cpu.leaf7_features | tr ' ' '\n' | grep -iE '^(SSE2|SSSE3|SSE4.2|AVX1.0|AVX2)$' | tr '\n' ' '; echo
+          sw_vers
+
+      - name: Homebrew FFmpeg (clip generator and SIMD reference)
+        run: |
+          brew install ffmpeg >/dev/null
+          ffmpeg -hide_banner -version | head -1
+
+      - name: Generate test clips
+        run: |
+          mkdir -p clips && cd clips
+          ffmpeg -hide_banner -loglevel error -f lavfi -i testsrc2=size=1920x1080:rate=50 -t 20 \
+            -vf "tinterlace=mode=interleave_top,setfield=tff" -c:v libx264 -preset veryfast \
+            -flags +ildct+ilme -x264-params tff=1 -b:v 8M -pix_fmt yuv420p -f mpegts h264_1080i25.ts
+          ffmpeg -hide_banner -loglevel error -f lavfi -i testsrc2=size=1920x1080:rate=50 -t 10 \
+            -c:v libx264 -preset veryfast -b:v 8M -pix_fmt yuv420p -f mpegts h264_1080p50.ts
+          ffmpeg -hide_banner -loglevel error -f lavfi -i testsrc2=size=1920x1080:rate=50 -t 10 \
+            -c:v libx265 -preset ultrafast -pix_fmt yuv420p10le -x265-params log-level=error hevc10_1080p50.mkv
+          ffmpeg -hide_banner -loglevel error -f lavfi -i testsrc2=size=3840x2160:rate=25 -t 5 \
+            -c:v libx265 -preset ultrafast -pix_fmt yuv420p10le -x265-params log-level=error hevc10_2160p25.mkv
+          ls -la
+          ffprobe -hide_banner -loglevel error -show_entries stream=codec_name,field_order,width,height,r_frame_rate,nb_frames -of compact h264_1080i25.ts
+
+      - name: FFmpeg reference, SIMD on vs off
+        run: |
+          cd clips
+          for vf in bwdif yadif; do
+            for flags in "" "-cpuflags 0"; do
+              label="${vf} ${flags:-simd}"
+              t=$( { /usr/bin/time -p ffmpeg -hide_banner -loglevel error $flags -threads 1 -i h264_1080i25.ts -vf $vf -an -f null - ; } 2>&1 | awk '/^real/{print $2}')
+              echo "ffmpeg ${label}: ${t}s for 500 frames (1 thread)" | tee -a ../ffmpeg_ref.txt
+            done
+          done
+
+      - name: Fetch release frameworks
+        run: |
+          for v in $VERSIONS; do
+            mkdir -p rel/$v fw/$v
+            if ! gh release download "$v" -R "$GITHUB_REPOSITORY" \
+                 -p "libmpv-xcframeworks_${v}_macos-universal-video-default.tar.gz" -D rel/$v; then
+              echo "::warning::release $v not found, skipping"; continue
+            fi
+            tar -xzf rel/$v/*.tar.gz -C rel/$v
+            find rel/$v -type d -path '*macos-arm64_x86_64/*.framework' -prune -exec cp -R {} fw/$v/ \;
+            ls fw/$v
+            lipo -info fw/$v/Avutil.framework/Avutil || true
+          done
+
+      - name: Benchmark each release
+        run: |
+          for v in $VERSIONS; do
+            [ -d fw/$v/Mpv.framework ] || continue
+            python3 ci/intel_bench.py "$PWD/fw/$v" "$v" "$PWD/clips" "bench_$v.json"
+          done
+
+      - name: Summary
+        if: always()
+        run: |
+          python3 - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import json, glob
+          res = [json.load(open(f)) for f in sorted(glob.glob('bench_*.json'))]
+          print('## libmpv on Intel runner\n')
+          for r in res:
+              print(f"**{r['label']}** config: {r['config']}\n")
+          names = [c['case'] for c in res[0]['cases']] if res else []
+          print('| case | ' + ' | '.join(r['label'] for r in res) + ' |')
+          print('|---|' + '---|' * len(res))
+          for i, n in enumerate(names):
+              cells = []
+              for r in res:
+                  c = r['cases'][i]
+                  cells.append(f"{c.get('fps')} fps ({c.get('realtime_x')}x, hw={c.get('hwdec_current')})" if 'fps' in c else 'error')
+              print(f'| {n} | ' + ' | '.join(cells) + ' |')
+          print('\n```')
+          print(open('ffmpeg_ref.txt').read() if glob.glob('ffmpeg_ref.txt') else '')
+          print('```')
+          PY
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: intel-bench
+          path: |
+            bench_*.json
+            ffmpeg_ref.txt

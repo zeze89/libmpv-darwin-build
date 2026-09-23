@@ -389,6 +389,28 @@ options = disable_all_options
 # common
 options += common_options
 options += audio_common_options
+
+# --- Nightmare TV: x86 SIMD for the Intel slice (2026-09-24) ---
+#
+# disable_all_options turns x86asm and runtime CPU detection off for every
+# arch, and nothing turned them back on, so the Intel half of mac-v2 was pure
+# C: no SSE2/SSSE3/AVX2 in the decoders, swscale or the lavfi filters. That
+# matters most for bwdif/yadif, which run on the CPU for every interlaced
+# live channel (the app enables deinterlacing by default), and for software
+# HEVC when VideoToolbox falls back. A 2017 Intel MacBook Pro reported
+# stutter where a Chromium based player did not.
+#
+# Runtime detection is required with it: without it FFmpeg only uses what the
+# compile target guarantees, and the SSSE3/AVX2 paths would stay unused.
+# nasm is added to nativeBuildInputs in default.nix; it runs on the build
+# host and emits macho64 objects, the same way libx264 and libvpx build here.
+# arm64 slices are unaffected (NEON is enabled in video_common_options).
+if host_machine.cpu_family() == 'x86_64'
+    options += [
+        '--enable-x86asm',
+        '--enable-runtime-cpudetect',
+    ]
+endif
 if variant == 'video'
     options += video_common_options
 endif

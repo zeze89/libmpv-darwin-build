@@ -102,6 +102,25 @@ jobs:
         run: |
           nix develop -c make XCODE_PATH=${XCODE_PATH} VERSION=${VERSION}
 
+      # Nightmare TV: the Intel slice must carry x86 SIMD (mac-v3 onwards).
+      # mac-v2 shipped pure C on Intel because disable_all_options turns
+      # x86asm off and nothing turned it back on. FFmpeg embeds its configure
+      # line in libavutil, so read it from the x86_64 slice that ships.
+      - name: Intel slice must be built with x86 SIMD
+        run: |
+          t=$(ls result/libmpv-xcframeworks_*_macos-universal-video-default.tar.gz | head -1)
+          [ -n "$t" ] || { echo "::error::macos-universal-video-default tarball not found"; exit 1; }
+          mkdir -p "$RUNNER_TEMP/simd" && tar -xzf "$t" -C "$RUNNER_TEMP/simd"
+          f=$(find "$RUNNER_TEMP/simd" -path '*macos-arm64_x86_64/Avutil.framework/Avutil' | head -1)
+          lipo "$f" -thin x86_64 -output "$RUNNER_TEMP/avutil_x86_64"
+          conf=$(strings "$RUNNER_TEMP/avutil_x86_64" | grep -m1 -- '--prefix=' || true)
+          for opt in --enable-x86asm --enable-runtime-cpudetect; do
+            case "$conf" in
+              *"$opt"*) echo "x86_64 avutil configure has $opt" ;;
+              *) echo "::error::x86_64 slice was configured without $opt"; exit 1 ;;
+            esac
+          done
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v7
         with:

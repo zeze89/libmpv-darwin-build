@@ -64,6 +64,7 @@ pkgs.stdenvNoCC.mkDerivation {
   enableParallelBuilding = true;
   nativeBuildInputs = [
     pkgs.meson
+    pkgs.nasm
     pkgs.ninja
     pkgs.pkg-config
   ];
