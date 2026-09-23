@@ -23,14 +23,14 @@ on:
     inputs:
       versions:
         description: 'Release tags to compare'
-        default: 'mac-v2 mac-v3'
+        default: 'mac-v2 mac-v3 mac-v4'
 
 jobs:
   bench:
     runs-on: macos-15-intel
     timeout-minutes: 60
     env:
-      VERSIONS: ${{ github.event.inputs.versions || 'mac-v2 mac-v3' }}
+      VERSIONS: ${{ github.event.inputs.versions || 'mac-v2 mac-v3 mac-v4' }}
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v6
