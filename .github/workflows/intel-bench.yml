@@ -60,6 +60,7 @@ jobs:
             -c:v libx265 -preset ultrafast -pix_fmt yuv420p10le -x265-params log-level=error hevc10_1080p50.mkv
           ffmpeg -hide_banner -loglevel error -f lavfi -i testsrc2=size=3840x2160:rate=25 -t 5 \
             -c:v libx265 -preset ultrafast -pix_fmt yuv420p10le -x265-params log-level=error hevc10_2160p25.mkv
+          ffmpeg -hide_banner -loglevel error -f lavfi -i testsrc2=size=1920x1080:rate=30 -t 5             -c:v libsvtav1 -preset 12 -pix_fmt yuv420p av1_1080p30.mkv           || ffmpeg -hide_banner -loglevel error -f lavfi -i testsrc2=size=1920x1080:rate=30 -t 5             -c:v libaom-av1 -cpu-used 8 -row-mt 1 -pix_fmt yuv420p av1_1080p30.mkv
           ls -la
           ffprobe -hide_banner -loglevel error -show_entries stream=codec_name,field_order,width,height,r_frame_rate,nb_frames -of compact h264_1080i25.ts
 

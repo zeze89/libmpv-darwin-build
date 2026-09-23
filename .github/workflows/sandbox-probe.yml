@@ -1,0 +1,88 @@
+name: sandbox-probe
+
+# Nightmare TV: what the App Sandbox allows with the app's Release
+# entitlements, measured instead of argued. The code base contradicts itself
+# (net_hardening.dart says exec of outside tools is blocked, win_power.dart
+# says pmset works) and recording on macOS depends on running a Homebrew
+# ffmpeg. A tiny probe app is signed ad hoc with (A) the shipped entitlements
+# and (B) A plus Downloads and Movies access, launched with `open`, and
+# reports each operation from inside its container.
+
+on:
+  push:
+    branches:
+      - nightmare-bench
+  workflow_dispatch:
+
+jobs:
+  probe:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-15-intel, macos-15]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: ffmpeg for the exec test
+        run: |
+          brew list ffmpeg >/dev/null 2>&1 || brew install ffmpeg >/dev/null
+          echo "FFMPEG=$(brew --prefix)/bin/ffmpeg" >> "$GITHUB_ENV"
+          sw_vers; uname -m
+
+      - name: Build probe apps
+        run: |
+          swiftc -O ci/sandbox_probe.swift -o probe_bin
+          mk() {
+            id=$1; ents=$2
+            app="$id.app"
+            mkdir -p "$app/Contents/MacOS"
+            cp probe_bin "$app/Contents/MacOS/Probe"
+            cat > "$app/Contents/Info.plist" <<PL
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+          <key>CFBundleIdentifier</key><string>tv.nightmare.$id</string>
+          <key>CFBundleExecutable</key><string>Probe</string>
+          <key>CFBundlePackageType</key><string>APPL</string>
+          <key>CFBundleName</key><string>$id</string>
+          <key>LSUIElement</key><true/>
+          </dict></plist>
+          PL
+            printf '%s' "$ents" > "$id.entitlements"
+            codesign --force --sign - --entitlements "$id.entitlements" "$app"
+            codesign -d --entitlements - "$app" 2>/dev/null | tail -20
+          }
+          base='<key>com.apple.security.app-sandbox</key><true/><key>com.apple.security.network.client</key><true/><key>com.apple.security.network.server</key><true/><key>com.apple.security.files.user-selected.read-write</key><true/><key>com.apple.security.device.audio-input</key><true/>'
+          extra='<key>com.apple.security.files.downloads.read-write</key><true/><key>com.apple.security.assets.movies.read-write</key><true/>'
+          head='<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"><plist version="1.0"><dict>'
+          mk probeA "${head}${base}</dict></plist>"
+          mk probeB "${head}${base}${extra}</dict></plist>"
+
+      - name: Run probes
+        run: |
+          for id in probeA probeB; do
+            open "$id.app" --args "$FFMPEG"
+            for i in $(seq 1 60); do
+              f="$HOME/Library/Containers/tv.nightmare.$id/Data/probe.json"
+              [ -f "$f" ] && break
+              sleep 2
+            done
+            echo "=== $id"
+            cat "$f" || echo "no result file"
+            cp "$f" "result_$id.json" 2>/dev/null || true
+          done
+
+      - name: Sandbox denials
+        if: always()
+        run: |
+          log show --last 10m --style compact --predicate 'sender == "Sandbox" OR eventMessage CONTAINS "deny("' 2>/dev/null | grep -i "probe" | head -60 | tee sandbox_denials.txt
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: sandbox-probe-${{ matrix.runner }}
+          path: |
+            result_*.json
+            sandbox_denials.txt

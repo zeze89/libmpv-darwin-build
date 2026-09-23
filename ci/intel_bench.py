@@ -23,6 +23,7 @@ CASES = [
     ('hevc10_1080p50',      'hevc10_1080p50.mkv', 50, 500, {'hwdec': 'no'}),
     ('hevc10_2160p25',      'hevc10_2160p25.mkv', 25, 125, {'hwdec': 'no'}),
     ('hevc10_2160p25_vt',   'hevc10_2160p25.mkv', 25, 125, {'hwdec': 'videotoolbox-copy'}),
+    ('av1_1080p30', 'av1_1080p30.mkv', 30, 150, {'hwdec': 'no'}),
     ('h264_1080p50_atadenoise', 'h264_1080p50.ts', 50, 500, {'hwdec': 'no', 'vf': 'lavfi=[atadenoise]'}),
     ('h264_1080i_bwdif_2threads', 'h264_1080i25.ts', 25, 500, {'hwdec': 'no', 'vd-lavc-threads': '2', 'vf': 'lavfi=[bwdif=mode=send_frame:parity=auto:deint=all]'}),
     ('hevc10_1080p50_2threads', 'hevc10_1080p50.mkv', 50, 500, {'hwdec': 'no', 'vd-lavc-threads': '2'}),
@@ -117,6 +118,46 @@ def run_case(fw_dir, clips_dir, case):
             'warnings': logs[:15]}
 
 
+def caps(fw_dir, clips_dir):
+    """Components the app relies on, read from the running mpv, plus a real
+    screenshot-to-file (needs a png encoder in libavcodec)."""
+    mpv = load(fw_dir)
+    h = mpv.mpv_create()
+    for k, v in {'vo': 'null', 'ao': 'null', 'idle': 'yes', 'terminal': 'no', 'pause': 'yes'}.items():
+        mpv.mpv_set_option_string(h, k.encode(), v.encode())
+    assert mpv.mpv_initialize(h) == 0
+    out = {}
+    lists = {'demuxer-lavf-list': ['rtp', 'sdp', 'mpegts', 'hls'],
+             'decoder-list': ['truehd', 'mlp', 'cc_dec', 'vc1', 'libdav1d', 'hevc'],
+             'protocol-list': ['rtp', 'udp', 'https'],
+             'encoder-list': ['png']}
+    for prop_name, wanted in lists.items():
+        raw = prop(mpv, h, prop_name) or ''
+        names = set()
+        try:
+            for item in json.loads(raw):
+                if isinstance(item, dict):
+                    names.add(item.get('codec') or item.get('driver') or item.get('name') or '')
+                else:
+                    names.add(str(item))
+        except Exception:
+            names = set(raw.replace(',', ' ').split())
+        out[prop_name] = {w: (w in names or any(n == w for n in names)) for w in wanted}
+    path = os.path.join(clips_dir, 'h264_1080p50.ts').encode()
+    mpv.mpv_command(h, (ctypes.c_char_p * 3)(b'loadfile', path, None))
+    shot = os.path.join(clips_dir, 'shot.png')
+    t_end = time.time() + 30
+    while time.time() < t_end:
+        ev = mpv.mpv_wait_event(h, 1.0).contents
+        if ev.event_id == 21:
+            break
+    rc = mpv.mpv_command(h, (ctypes.c_char_p * 4)(b'screenshot-to-file', shot.encode(), b'video', None))
+    time.sleep(1)
+    out['screenshot_png'] = {'command_rc': rc, 'written': os.path.exists(shot) and os.path.getsize(shot) > 0}
+    mpv.mpv_terminate_destroy(h)
+    return out
+
+
 def config_line(fw_dir):
     avutil = ctypes.CDLL(os.path.join(fw_dir, 'Avutil.framework', 'Avutil'))
     avutil.avutil_configuration.restype = ctypes.c_char_p
@@ -132,6 +173,9 @@ def main():
         fw_dir, clips_dir, idx = sys.argv[2], sys.argv[3], int(sys.argv[4])
         print(json.dumps(run_case(fw_dir, clips_dir, CASES[idx])))
         return
+    if sys.argv[1] == '--caps':
+        print(json.dumps(caps(sys.argv[2], sys.argv[3])))
+        return
     if sys.argv[1] == '--config':
         print(json.dumps(config_line(sys.argv[2])))
         return
@@ -141,6 +185,13 @@ def main():
     res['config'] = json.loads(subprocess.run(
         [sys.executable, __file__, '--config', fw_dir], env=env,
         capture_output=True, text=True, check=True).stdout)
+    p = subprocess.run([sys.executable, __file__, '--caps', fw_dir, clips_dir], env=env,
+                       capture_output=True, text=True)
+    try:
+        res['caps'] = json.loads(p.stdout.strip().splitlines()[-1])
+    except Exception:
+        res['caps'] = {'error': (p.stderr or p.stdout)[-600:]}
+    print(label, 'caps', json.dumps(res['caps']), flush=True)
     res['cases'] = []
     for i, c in enumerate(CASES):
         p = subprocess.run([sys.executable, __file__, '--case', fw_dir, clips_dir, str(i)],
