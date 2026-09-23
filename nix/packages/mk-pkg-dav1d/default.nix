@@ -29,6 +29,7 @@ pkgs.stdenvNoCC.mkDerivation {
   enableParallelBuilding = true;
   nativeBuildInputs = [
     pkgs.meson
+    pkgs.nasm
     pkgs.ninja
     pkgs.pkg-config
   ];
@@ -38,7 +39,7 @@ pkgs.stdenvNoCC.mkDerivation {
       --cross-file ${crossFile} \
       --prefix=$out \
       -Dbitdepths="['8', '16']" \
-      -Denable_asm=false \
+      -Denable_asm=true \
       -Denable_tools=false \
       -Denable_examples=false \
       -Denable_tests=false \

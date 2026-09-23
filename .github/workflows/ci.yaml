@@ -50,6 +50,13 @@ jobs:
           for x in spdif mpegts matroska; do
             grep -q -- "--enable-muxer=$x'" "$f" || missing="$missing muxer:$x"
           done
+          for x in truehd mlp cc_dec vc1; do
+            grep -q -- "--enable-decoder=$x'" "$f" || missing="$missing decoder:$x"
+          done
+          for x in rtp sdp; do
+            grep -q -- "--enable-demuxer=$x'" "$f" || missing="$missing demuxer:$x"
+          done
+          grep -q -- "--enable-encoder=png'" "$f" || missing="$missing encoder:png"
           if [ -n "$missing" ]; then
             echo "$f is missing:$missing"
             echo "These are not optional extras. Without scale/format the lavfi"
@@ -57,7 +64,7 @@ jobs:
             echo "deinterlacer outright, silently. Restore the block."
             exit 1
           fi
-          echo "filter whitelist: all 19 entries present"
+          echo "whitelist: filters, muxers, decoders, demuxers and encoder present"
 
       - uses: DeterminateSystems/nix-installer-action@v22
         with:

@@ -100,6 +100,11 @@ audio_default_options = [
     '--enable-decoder=pcm*',
     '--enable-decoder=dsd*',
     '--enable-decoder=dca', # required by dts
+    # Nightmare TV (2026-09-24): TrueHD tracks in VOD played silent; the demuxer
+    # was here but not the decoder. The Windows build has both.
+    '--enable-decoder=truehd',
+    '--enable-decoder=mlp',
+    '--enable-parser=mlp',
 
     # parsers   
     '--enable-parser=aac*',
@@ -235,6 +240,15 @@ video_default_options = [
     '--enable-decoder=vplayer',
     '--enable-decoder=webvtt',
     '--enable-decoder=movtext',
+    # Nightmare TV (2026-09-24): parity with the Windows build.
+    #   cc_dec  EIA-608/708 closed captions carried in the video stream
+    #   vc1     VC-1 VOD (the wmv3 decoder was already here)
+    '--enable-decoder=cc_dec',
+    '--enable-decoder=vc1',
+    '--enable-parser=vc1',
+    # screenshot-to-file writes .png through libavcodec; with no encoder at all
+    # every screenshot failed on macOS.
+    '--enable-encoder=png',
 
     # parsers
     '--enable-parser=h263',
@@ -259,6 +273,11 @@ video_default_options = [
     '--enable-demuxer=mpegvideo',
     '--enable-demuxer=hevc',
     '--enable-demuxer=rtsp',
+    # Nightmare TV (2026-09-24): ISP multicast IPTV arrives as rtp://@239.x.x.x;
+    # the rtp protocol was enabled but not the rtp/sdp demuxers, so those
+    # sources failed with an unrecognised format on macOS only.
+    '--enable-demuxer=rtp',
+    '--enable-demuxer=sdp',
     # '--enable-demuxer=mpeg4', # WARNING: Option --enable-demuxer=mpeg4 did not match anything
     '--enable-demuxer=mjpeg',
     '--enable-demuxer=avi',
