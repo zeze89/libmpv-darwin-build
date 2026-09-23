@@ -23,6 +23,8 @@ CASES = [
     ('hevc10_2160p25',      'hevc10_2160p25.mkv', 25, 125, {'hwdec': 'no'}),
     ('hevc10_2160p25_vt',   'hevc10_2160p25.mkv', 25, 125, {'hwdec': 'videotoolbox-copy'}),
     ('h264_1080p50_atadenoise', 'h264_1080p50.ts', 50, 500, {'hwdec': 'no', 'vf': 'lavfi=[atadenoise]'}),
+    ('h264_1080i_bwdif_2threads', 'h264_1080i25.ts', 25, 500, {'hwdec': 'no', 'vd-lavc-threads': '2', 'vf': 'lavfi=[bwdif=mode=send_frame:parity=auto:deint=all]'}),
+    ('hevc10_1080p50_2threads', 'hevc10_1080p50.mkv', 50, 500, {'hwdec': 'no', 'vd-lavc-threads': '2'}),
 ]
 
 class Event(ctypes.Structure):
@@ -68,7 +70,7 @@ def run_case(fw_dir, clips_dir, case):
     mpv = load(fw_dir)
     h = mpv.mpv_create()
     base = {'vo': 'null', 'ao': 'null', 'untimed': 'yes', 'framedrop': 'no',
-            'audio': 'no', 'terminal': 'no', 'idle': 'no', 'keep-open': 'no',
+            'audio': 'no', 'terminal': 'no', 'idle': 'yes', 'keep-open': 'no',
             'demuxer-max-bytes': '64MiB'}
     base.update(opts)
     for k, v in base.items():
