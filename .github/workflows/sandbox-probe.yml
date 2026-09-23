@@ -64,15 +64,21 @@ jobs:
         run: |
           for id in probeA probeB; do
             open "$id.app" --args "$FFMPEG"
+            f="$HOME/Library/Containers/tv.nightmare.$id/Data/probe.json"
             for i in $(seq 1 60); do
-              f="$HOME/Library/Containers/tv.nightmare.$id/Data/probe.json"
-              [ -f "$f" ] && break
+              grep -q '"done"' "$f" 2>/dev/null && break
               sleep 2
             done
             echo "=== $id"
             cat "$f" || echo "no result file"
             cp "$f" "result_$id.json" 2>/dev/null || true
           done
+
+      - name: Crash reports
+        if: always()
+        run: |
+          ls -la ~/Library/Logs/DiagnosticReports/ 2>/dev/null | grep -i probe || echo "no probe crash report"
+          for f in ~/Library/Logs/DiagnosticReports/Probe*; do [ -f "$f" ] && head -60 "$f"; done || true
 
       - name: Sandbox denials
         if: always()

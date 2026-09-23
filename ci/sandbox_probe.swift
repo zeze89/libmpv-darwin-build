@@ -10,8 +10,15 @@ import Foundation
 import Security
 
 var results: [[String: String]] = []
+// Written after every test, so a hang or crash still leaves partial results.
+func flush() {
+    if let d = try? JSONSerialization.data(withJSONObject: results, options: [.prettyPrinted]) {
+        try? d.write(to: URL(fileURLWithPath: NSHomeDirectory() + "/probe.json"))
+    }
+}
 func record(_ name: String, _ ok: Bool, _ detail: String) {
     results.append(["test": name, "ok": ok ? "yes" : "no", "detail": String(detail.prefix(300))])
+    flush()
 }
 
 func run(_ name: String, _ path: String, _ args: [String]) {
@@ -22,9 +29,13 @@ func run(_ name: String, _ path: String, _ args: [String]) {
     p.standardOutput = out; p.standardError = err
     do {
         try p.run()
+        // Drain the pipes BEFORE waiting: `security find-certificate -a -p`
+        // prints a few hundred KB and blocks on a full pipe otherwise.
+        let od = out.fileHandleForReading.readDataToEndOfFile()
+        let ed = err.fileHandleForReading.readDataToEndOfFile()
         p.waitUntilExit()
-        let o = String(data: out.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-        let e = String(data: err.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        let o = String(data: od, encoding: .utf8) ?? ""
+        let e = String(data: ed, encoding: .utf8) ?? ""
         record(name, p.terminationStatus == 0, "exit=\(p.terminationStatus) out=\(o.prefix(120)) err=\(e.prefix(160))")
     } catch {
         record(name, false, "launch failed: \(error)")
@@ -90,5 +101,4 @@ let b = withUnsafePointer(to: &addr) {
 record("bind_0.0.0.0_8086", b == 0 && listen(fd, 1) == 0, "errno \(errno)")
 close(fd)
 
-let data = try! JSONSerialization.data(withJSONObject: results, options: [.prettyPrinted])
-try! data.write(to: URL(fileURLWithPath: container + "/probe.json"))
+record("done", true, "all tests ran")
