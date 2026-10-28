@@ -195,6 +195,13 @@ audio_default_options = [
     '--enable-filter=asetpts',
     '--enable-filter=dynaudnorm',
     '--enable-filter=loudnorm',
+    # Nightmare TV Motor Paketi (2026-10-29, owner approved, same as win-v7
+    # and android-v4): measurement and speech filters, all LGPL 2.1+.
+    '--enable-filter=astats',
+    '--enable-filter=ebur128',
+    '--enable-filter=silencedetect',
+    '--enable-filter=dialoguenhance',
+    '--enable-filter=speechnorm',
 ]
 
 # https://github.com/media-kit/libmpv-android-video-build/blob/7353af784df9bab3256acd8d90f208024d16ab96/buildscripts/flavors/default.sh
@@ -244,6 +251,11 @@ video_default_options = [
     #   cc_dec  EIA-608/708 closed captions carried in the video stream
     #   vc1     VC-1 VOD (the wmv3 decoder was already here)
     '--enable-decoder=cc_dec',
+    # Motor Paketi (2026-10-29): 'cc_dec' above is the codec NAME, not the
+    # configure component name, so configure only warned "did not match
+    # anything" and mac-v4 shipped without the decoder. The component is
+    # ccaption. The cc_dec line stays so the CI whitelist step keeps passing.
+    '--enable-decoder=ccaption',
     '--enable-decoder=vc1',
     '--enable-parser=vc1',
     # screenshot-to-file writes .png through libavcodec; with no encoder at all
@@ -346,6 +358,12 @@ video_default_options = [
     '--enable-filter=atadenoise',
     '--enable-filter=unsharp',
     '--enable-filter=gradfun',
+    # Motor Paketi (2026-10-29): freeze detection and black border
+    # measurement. cropdetect is deliberately absent: FFmpeg 6.0 configure
+    # has cropdetect_filter_deps="gpl" and this build is --disable-gpl, so it
+    # would be silently ignored. bbox is the LGPL equivalent.
+    '--enable-filter=freezedetect',
+    '--enable-filter=bbox',
 
     # --- Nightmare TV: muxers (2026-09-21) ---
     #

@@ -4,11 +4,15 @@ on:
   push:
     branches:
       - main
+      - motor/paket-filtre
     tags:
       - "*"
   pull_request:
     branches:
       - "*"
+  # Nightmare TV: build a branch without a tag (no release step runs, the
+  # Release step is gated on refs/tags/).
+  workflow_dispatch:
 
 jobs:
   ci:
@@ -44,13 +48,15 @@ jobs:
           missing=""
           for x in yadif bwdif scale format null copy setpts \
                    atadenoise unsharp gradfun \
-                   aformat aresample anull asetpts dynaudnorm loudnorm; do
+                   aformat aresample anull asetpts dynaudnorm loudnorm \
+                   astats ebur128 silencedetect freezedetect \
+                   dialoguenhance speechnorm bbox; do
             grep -q -- "--enable-filter=$x'" "$f" || missing="$missing filter:$x"
           done
           for x in spdif mpegts matroska; do
             grep -q -- "--enable-muxer=$x'" "$f" || missing="$missing muxer:$x"
           done
-          for x in truehd mlp cc_dec vc1; do
+          for x in truehd mlp cc_dec ccaption vc1; do
             grep -q -- "--enable-decoder=$x'" "$f" || missing="$missing decoder:$x"
           done
           for x in rtp sdp; do
