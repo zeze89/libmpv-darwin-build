@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - main
+      # Nightmare TV iOS line: a branch push builds and checks without
+      # releasing; the ios-v1 tag on the same commit publishes.
+      - ios-v1
     tags:
       - "*"
   pull_request:
@@ -102,39 +105,85 @@ jobs:
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
 
       # See ${workspace}/Makefile
+      #
+      # Nightmare TV iOS line (ios-v1): only the iOS video-default
+      # xcframeworks are built (device arm64 + simulator arm64/x86_64). The
+      # FFmpeg component list is the same meson.build as mac-v4, so iOS gets
+      # the same filters and muxers macOS ships with. macOS keeps using the
+      # mac-v4 release; nothing here touches it.
       - name: Build
         env:
           XCODE_PATH: ${{ steps.xcode_path.outputs.xcode_path }}
           VERSION: ${{ steps.version.outputs.version }}
         run: |
-          nix develop -c make XCODE_PATH=${XCODE_PATH} VERSION=${VERSION}
+          nix develop -c make XCODE_PATH=${XCODE_PATH} VERSION=${VERSION}             TARGET=mk-out-archive-xcframeworks-ios-universal-video-default
+          ls -la result/
 
-      # Nightmare TV: the Intel slice must carry x86 SIMD (mac-v3 onwards).
-      # mac-v2 shipped pure C on Intel because disable_all_options turns
-      # x86asm off and nothing turned it back on. FFmpeg embeds its configure
-      # line in libavutil, so read it from the x86_64 slice that ships.
-      - name: Intel slice must be built with x86 SIMD
+      # Nightmare TV: every shipped iOS slice must carry the component list.
+      # FFmpeg embeds its configure line in libavutil; the filters and muxers
+      # are also checked by AVOption names that only exist when the component
+      # is compiled in (a filter NAME in a binary is not evidence; measured on
+      # Windows). Licence: --enable-gpl / --enable-nonfree must be absent.
+      - name: iOS slices must carry the Nightmare component list
         run: |
-          t=$(ls result/libmpv-xcframeworks_*_macos-universal-video-default.tar.gz | head -1)
-          [ -n "$t" ] || { echo "::error::macos-universal-video-default tarball not found"; exit 1; }
-          mkdir -p "$RUNNER_TEMP/simd" && tar -xzf "$t" -C "$RUNNER_TEMP/simd"
-          f=$(find "$RUNNER_TEMP/simd" -path '*macos-arm64_x86_64/Avutil.framework/Avutil' | head -1)
-          lipo "$f" -thin x86_64 -output "$RUNNER_TEMP/avutil_x86_64"
-          conf=$(strings "$RUNNER_TEMP/avutil_x86_64" | grep -m1 -- '--prefix=' || true)
-          for opt in --enable-x86asm --enable-runtime-cpudetect; do
-            case "$conf" in
-              *"$opt"*) echo "x86_64 avutil configure has $opt" ;;
-              *) echo "::error::x86_64 slice was configured without $opt"; exit 1 ;;
-            esac
+          set -e
+          t=$(ls result/libmpv-xcframeworks_*_ios-universal-video-default.tar.gz | head -1)
+          [ -n "$t" ] || { echo "::error::ios-universal-video-default tarball not found"; exit 1; }
+          X="$RUNNER_TEMP/iosx"; mkdir -p "$X" && tar -xzf "$t" -C "$X"
+          find "$X" -maxdepth 3 -type d -name 'ios-*' | sort
+          bad=""
+          slices=0
+          for avu in $(find "$X" -path '*Avutil.xcframework/*/Avutil.framework/Avutil' -type f | sort); do
+            sdir=$(dirname "$(dirname "$avu")")
+            flt=$(find "$(dirname "$(dirname "$sdir")")/Avfilter.xcframework/$(basename "$sdir")" -name Avfilter -type f | head -1)
+            fmt=$(find "$(dirname "$(dirname "$sdir")")/Avformat.xcframework/$(basename "$sdir")" -name Avformat -type f | head -1)
+            for a in $(lipo -archs "$avu"); do
+              slices=$((slices+1))
+              tag="$(basename "$sdir")/$a"
+              lipo "$avu" -thin "$a" -output "$RUNNER_TEMP/avu_$a" 2>/dev/null || cp "$avu" "$RUNNER_TEMP/avu_$a"
+              conf=$(strings "$RUNNER_TEMP/avu_$a" | grep -m1 -- '--prefix=' || true)
+              echo "== $tag"
+              echo "$conf" | tr ' ' '
+' | grep -E -- '^--(enable-(filter|muxer|protocol|gpl|nonfree|version3|videotoolbox)|disable-gpl)' | sort | tr '
+' ' '; echo
+              for opt in --enable-version3 --enable-videotoolbox                          --enable-filter=yadif --enable-filter=bwdif --enable-filter=scale                          --enable-filter=format --enable-filter=null --enable-filter=copy                          --enable-filter=setpts --enable-filter=atadenoise --enable-filter=unsharp                          --enable-filter=gradfun --enable-filter=aformat --enable-filter=aresample                          --enable-filter=anull --enable-filter=asetpts --enable-filter=dynaudnorm                          --enable-filter=loudnorm --enable-filter=overlay --enable-filter=equalizer                          --enable-muxer=spdif --enable-muxer=mpegts --enable-muxer=matroska                          --enable-demuxer=rtp --enable-demuxer=sdp --enable-decoder=truehd                          --enable-decoder=cc_dec --enable-encoder=png; do
+                case "$conf" in *"$opt"*) ;; *) bad="$bad $tag:$opt" ;; esac
+              done
+              for opt in --enable-gpl --enable-nonfree; do
+                case "$conf" in *"$opt"*) bad="$bad $tag:LICENCE$opt" ;; esac
+              done
+              if [ "$a" = x86_64 ]; then
+                case "$conf" in *--enable-x86asm*) ;; *) bad="$bad $tag:--enable-x86asm" ;; esac
+              fi
+              for pair in force_original_aspect_ratio:scale pix_fmts:format atadenoise:atadenoise                           luma_msize_x:unsharp measured_I:loudnorm gausssize:dynaudnorm send_field:bwdif; do
+                m="${pair%%:*}"; f="${pair##*:}"
+                grep -q -a -- "$m" "$flt" || bad="$bad $tag:filter-marker:$f"
+              done
+              for pair in reserve_index_space:matroska mpegts_flags:mpegts; do
+                m="${pair%%:*}"; f="${pair##*:}"
+                grep -q -a -- "$m" "$fmt" || bad="$bad $tag:muxer-marker:$f"
+              done
+            done
           done
+          echo "slices checked: $slices"
+          [ "$slices" -ge 3 ] || bad="$bad expected>=3-slices(got-$slices)"
+          if [ -n "$bad" ]; then echo "::error::missing:$bad"; exit 1; fi
+          echo "iOS component list: all slices OK (LGPL, no --enable-gpl/--enable-nonfree)"
+
+      - name: SHA256 sums
+        run: |
+          mkdir -p "$RUNNER_TEMP/sums"
+          (cd result && shasum -a 256 *.tar.gz *.zip) | tee "$RUNNER_TEMP/sums/SHA256SUMS.txt"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v7
         with:
           if-no-files-found: error
+          retention-days: 5
           path: |
             result/*.tar.gz
             result/*.zip
+            ${{ runner.temp }}/sums/SHA256SUMS.txt
 
       - name: Release
         uses: softprops/action-gh-release@v3
@@ -144,3 +193,4 @@ jobs:
           files: |
             result/*.tar.gz
             result/*.zip
+            ${{ runner.temp }}/sums/SHA256SUMS.txt
