@@ -143,9 +143,7 @@ jobs:
               lipo "$avu" -thin "$a" -output "$RUNNER_TEMP/avu_$a" 2>/dev/null || cp "$avu" "$RUNNER_TEMP/avu_$a"
               conf=$(strings "$RUNNER_TEMP/avu_$a" | grep -m1 -- '--prefix=' || true)
               echo "== $tag"
-              echo "$conf" | tr ' ' '
-' | grep -E -- '^--(enable-(filter|muxer|protocol|gpl|nonfree|version3|videotoolbox)|disable-gpl)' | sort | tr '
-' ' '; echo
+              echo "$conf" | tr ' ' '\n' | grep -E -- '^--(enable-(filter|muxer|protocol|gpl|nonfree|version3|videotoolbox)|disable-gpl)' | sort | tr '\n' ' '; echo
               for opt in --enable-version3 --enable-videotoolbox                          --enable-filter=yadif --enable-filter=bwdif --enable-filter=scale                          --enable-filter=format --enable-filter=null --enable-filter=copy                          --enable-filter=setpts --enable-filter=atadenoise --enable-filter=unsharp                          --enable-filter=gradfun --enable-filter=aformat --enable-filter=aresample                          --enable-filter=anull --enable-filter=asetpts --enable-filter=dynaudnorm                          --enable-filter=loudnorm --enable-filter=overlay --enable-filter=equalizer                          --enable-muxer=spdif --enable-muxer=mpegts --enable-muxer=matroska                          --enable-demuxer=rtp --enable-demuxer=sdp --enable-decoder=truehd                          --enable-decoder=cc_dec --enable-encoder=png; do
                 case "$conf" in *"$opt"*) ;; *) bad="$bad $tag:$opt" ;; esac
               done
