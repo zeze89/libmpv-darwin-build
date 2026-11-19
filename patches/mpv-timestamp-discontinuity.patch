@@ -1,0 +1,50 @@
+diff --git a/player/audio.c b/player/audio.c
+index 2626bb24da..64dffc82db 100644
+--- a/player/audio.c
++++ b/player/audio.c
+@@ -894,6 +894,14 @@ void fill_audio_out_buffers(struct MPContext *mpctx)
+     {
+         MP_WARN(mpctx, "Reset playback due to audio timestamp reset.\n");
+         reset_playback_state(mpctx);
++        // This reset is not a seek: the playback position is unknown until
++        // the first frame after the discontinuity is played. last_seek_pts
++        // still holds the target of an older seek (or 0 from loading), and
++        // get_current_time() would return it. Refresh seeks issued before
++        // playback restarts (VO reinit on vo/wid change, filter changes,
++        // track refresh) would then jump back into the old time range.
++        // Report "unknown" instead; refresh seeks are skipped for it.
++        mpctx->last_seek_pts = MP_NOPTS_VALUE;
+         mp_wakeup_core(mpctx);
+     }
+ 
+diff --git a/player/video.c b/player/video.c
+index 0161929c46..d0c32d441a 100644
+--- a/player/video.c
++++ b/player/video.c
+@@ -966,6 +966,26 @@ static void calculate_frame_duration(struct MPContext *mpctx)
+         double pts1 = mpctx->next_frames[1]->pts;
+         if (pts0 != MP_NOPTS_VALUE && pts1 != MP_NOPTS_VALUE && pts1 >= pts0)
+             duration = pts1 - pts0;
++
++        // A timestamp discontinuity (e.g. HLS EXT-X-DISCONTINUITY) between
++        // these two frames is not a frame duration. handle_new_frame() treats
++        // the same jump as a discontinuity; use the same tolerance here and
++        // fall back to the nominal duration. Otherwise the last frame before
++        // the jump is held for up to 10 seconds, display sync is disabled,
++        // and a VO reconfig for the next frame waits until it is "done".
++        bool is_sparse = vo_c->is_sparse;
++        double tolerance = mpctx->demuxer->ts_resets_possible &&
++                           !is_sparse ? 5 : 1e4;
++        if (duration >= tolerance) {
++            double nominal = demux_duration;
++            if (nominal <= 0 && mpctx->num_past_frames > 1 &&
++                mpctx->past_frames[1].duration > 0 &&
++                mpctx->past_frames[1].duration < tolerance)
++                nominal = mpctx->past_frames[1].duration;
++            MP_VERBOSE(mpctx, "Timestamp discontinuity: %f -> %f, using frame "
++                       "duration %f\n", pts0, pts1, nominal);
++            duration = nominal;
++        }
+     }
+ 
+     // The following code tries to compensate for rounded Matroska timestamps
