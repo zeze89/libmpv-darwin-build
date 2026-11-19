@@ -1,24 +1,41 @@
 diff --git a/player/audio.c b/player/audio.c
-index 2626bb24da..64dffc82db 100644
+index 2626bb24da..acd3458147 100644
 --- a/player/audio.c
 +++ b/player/audio.c
-@@ -894,6 +894,14 @@ void fill_audio_out_buffers(struct MPContext *mpctx)
+@@ -892,9 +892,29 @@ void fill_audio_out_buffers(struct MPContext *mpctx)
+     if (mpctx->vo_chain && ao_c->track && ao_c->track->dec &&
+         mp_decoder_wrapper_get_pts_reset(ao_c->track->dec))
      {
-         MP_WARN(mpctx, "Reset playback due to audio timestamp reset.\n");
-         reset_playback_state(mpctx);
-+        // This reset is not a seek: the playback position is unknown until
-+        // the first frame after the discontinuity is played. last_seek_pts
-+        // still holds the target of an older seek (or 0 from loading), and
-+        // get_current_time() would return it. Refresh seeks issued before
-+        // playback restarts (VO reinit on vo/wid change, filter changes,
-+        // track refresh) would then jump back into the old time range.
-+        // Report "unknown" instead; refresh seeks are skipped for it.
-+        mpctx->last_seek_pts = MP_NOPTS_VALUE;
+-        MP_WARN(mpctx, "Reset playback due to audio timestamp reset.\n");
+-        reset_playback_state(mpctx);
++        // Resync only the audio side, like an audio track switch. A full
++        // playback reset would flush the video decoder too. With lookahead
++        // audio filters (dynaudnorm, loudnorm) the decoder sees the jump
++        // seconds before video reaches it, so the video decoder was flushed
++        // in the middle of a GOP (broken frames with hwdec) and video and
++        // audio could end up waiting for each other. Here the audio tail
++        // still inside the filters is dropped, audio waits in SYNCING until
++        // video crosses its own discontinuity (audio start is delayed to
++        // the video position, video keeps its own clock meanwhile).
++        MP_WARN(mpctx, "Audio timestamp reset, resyncing audio to video "
++                "(video continues).\n");
++        // The decoder keeps pts_reset set until the decoder itself is
++        // reset; reset it too (audio decoder only), otherwise this would
++        // trigger again on every iteration.
++        mp_filter_reset(ao_c->track->dec->f);
++        mp_filter_reset(ao_c->filter->f);
++        if (ao_c->queue_filter)
++            mp_filter_reset(ao_c->queue_filter);
++        if (mpctx->ao)
++            ao_reset(mpctx->ao);
++        reset_audio_state(mpctx);
          mp_wakeup_core(mpctx);
++        return;
      }
  
+     if (mpctx->audio_status == STATUS_SYNCING) {
 diff --git a/player/video.c b/player/video.c
-index 0161929c46..d0c32d441a 100644
+index 0161929c46..86762d9236 100644
 --- a/player/video.c
 +++ b/player/video.c
 @@ -966,6 +966,26 @@ static void calculate_frame_duration(struct MPContext *mpctx)
@@ -41,7 +58,7 @@ index 0161929c46..d0c32d441a 100644
 +                mpctx->past_frames[1].duration > 0 &&
 +                mpctx->past_frames[1].duration < tolerance)
 +                nominal = mpctx->past_frames[1].duration;
-+            MP_VERBOSE(mpctx, "Timestamp discontinuity: %f -> %f, using frame "
++            MP_WARN(mpctx, "Timestamp discontinuity: %f -> %f, using frame "
 +                       "duration %f\n", pts0, pts1, nominal);
 +            duration = nominal;
 +        }
